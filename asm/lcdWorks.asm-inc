@@ -1,0 +1,271 @@
+.macro LCD_SetRS_0
+         cbi   Port_LCD_RS, BIT_LCD_RS
+.endmacro
+.macro LCD_SetRS_1
+         sbi   Port_LCD_RS, BIT_LCD_RS
+.endmacro
+.macro LCD_SetE_0
+         cbi   Port_LCD_E, BIT_LCD_E
+.endmacro
+.macro LCD_SetE_1
+         sbi   Port_LCD_E, BIT_LCD_E
+.endmacro
+;-----------------------------------------------------------------
+LCDJoysticks:
+        .dw LCDText_JCursor*2, LCDText_JSinclair*2, LCDText_JKempston*2, LCDText_JUnused*2
+LCDText_Reset:
+        .db "Reset!", 0, 0
+LCDText_ResetFF7C:
+        .db "Reset FF7C", 0
+LCDText_NMI:
+        .db "NMI!", 0, 0
+LCDText_Wait:
+        .db "Wait ", 0
+LCDText_Norm:
+        .db "Norm ", 0
+LCDText_Turbo:
+        .db "Turbo", 0
+LCDText_JCursor:
+        .db "Cursor  ", 0, 0
+LCDText_JSinclair:
+        .db "Sinclair", 0, 0
+LCDText_JKempston:
+        .db "Kempston", 0, 0
+LCDText_JUnused:
+        .db "???     ", 0, 0
+LCDText_InitLine1:
+        ;    0123456789012345
+        .db "Magic 08.1      ", 0, 0
+LCDText_InitLine2:
+        .db "AlexCrush 2019  ", 0, 0
+;-----------------------------------------------------------------
+LCD_Init:
+        LCD_SetRS_0
+        LCD_SetE_0
+        ldi tmp, 250
+        rcall WAIT_Tmp_Millis; initial wait
+        ldi tmp, 250
+        rcall WAIT_Tmp_Millis; initial wait
+
+        ldi tmp, 0b00000000 ;// NOP
+        rcall LCD_OutTmp4Bit
+        ldi  tmp, 100
+        rcall WAIT_Tmp_Millis
+
+        ldi tmp, 0b00000010 ;//4 bit mode
+        rcall LCD_OutTmp4Bit
+        ldi  tmp, 100
+        rcall WAIT_Tmp_Millis
+
+        ldi tmp, 0b00101010  ; 4bit mode, 2 lines, 5x8 symbols), Russian font
+        rcall LCD_SendCommand
+
+        ldi tmp, 0b00001000 ;//выключили экран
+        rcall LCD_SendCommand
+
+        ldi tmp, 0b00010111 ;//переключение в текстовый режим
+        rcall LCD_SendCommand
+
+        ldi tmp, 0b00000110 ; Set increment mode, no shift
+        rcall LCD_SendCommand
+
+        ldi tmp, 0b00000001 ;//очистили от мусора ОЗУ
+        rcall LCD_SendCommand
+
+        ldi tmp, 0b00001100  ;//включили экран
+        rcall LCD_SendCommand
+
+        rcall LCD_Regenerate
+        ret
+;-------------------------------------------------------------------------------------
+LCD_SendCommand:
+        rcall LCD_OutTmp8Bit
+        ldi  tmp, 80
+        rjmp WAIT_Tmp_Millis
+;-------------------------------------------------------------------------------------
+LCD_OutputDataToDisplay:
+         ;line 1:
+         ldi tmp, 0b10000000 ;set DDRAM Addr to 0
+         LDIRamAddrZ LCDData
+         rcall LCD_OutputOneLine
+
+         ;Line 2:
+
+         ldi tmp, 0b11000000 ;set DDRAM Addr to 0x40 - second line
+LCD_OutputOneLine:
+         LCD_SetRS_0 //instruction
+         push zL
+         push zH
+         rcall LCD_OutTmp8Bit
+         rcall WAIT_40_Micros
+         pop zH
+         pop zL
+
+
+         LCD_SetRS_1 ; Data
+
+         ldi tmp, LCDCountInLine
+LCD_OutputOneLine_Loop:
+         push tmp
+         ld tmp, Z+
+         push zL
+         push zH
+         rcall LCD_OutTmp8Bit
+         rcall WAIT_40_Micros
+         pop zH
+         pop zL
+         pop tmp
+         dec tmp
+         brne LCD_OutputOneLine_Loop
+
+         ret
+;-------------------------------------------------------------------------------------
+LCD_OutTmp8Bit:
+; outputs 4 upper bits of TMP to port and ticks E
+; then outputs 4 lower bits of TMP to port and ticks E
+         swap tmp
+         rcall LCD_OutTmp4Bit
+         swap tmp
+LCD_OutTmp4Bit:; outputs 4 lower bits of TMP to port and ticks E
+         rcall LCD_OutTmpToD
+         LCD_SetE_1
+;//need to wait 140 ns
+         nop
+         nop
+         nop
+         nop
+         nop
+         nop
+         LCD_SetE_0
+         nop
+         nop
+         nop
+         ret
+;-------------------------------------------------------------------------------------
+LCD_OutTmpToD:
+         bst tmp, 0
+         cbi Port_LCD_Bit4, BIT_LCD_Bit4
+         brtc LCD_OutTmpToD_D4_0
+         sbi Port_LCD_Bit4, BIT_LCD_Bit4
+LCD_OutTmpToD_D4_0:
+
+         bst tmp, 1
+         cbi Port_LCD_Bit5, BIT_LCD_Bit5
+         brtc LCD_OutTmpToD_D5_0
+         sbi Port_LCD_Bit5, BIT_LCD_Bit5
+LCD_OutTmpToD_D5_0:
+
+         bst tmp, 2
+         cbi Port_LCD_Bit6, BIT_LCD_Bit6
+         brtc LCD_OutTmpToD_D6_0
+         sbi Port_LCD_Bit6, BIT_LCD_Bit6
+LCD_OutTmpToD_D6_0:
+
+         bst tmp, 3
+         cbi Port_LCD_Bit7, BIT_LCD_Bit7
+         brtc LCD_OutTmpToD_D7_0
+         sbi Port_LCD_Bit7, BIT_LCD_Bit7
+LCD_OutTmpToD_D7_0:
+
+         ret
+;-------------------------------------------------------------------------------------
+LCD_Regenerate:
+;0123456789012345
+;Norm
+;Turbo  A*
+;Wait   B
+;
+;Sinclair
+;Kempston
+;Cursor
+;
+        LDIRamAddrX LCDData
+        ldi tmp, ' '
+        ldi tmp2, LCDCount
+LCD_Generate_ClearLoop:
+        st X+, tmp
+        dec tmp2
+        brne LCD_Generate_ClearLoop
+
+        LDIRamAddrX LCDData
+        sbrs VAR_STATE, VAR_STATE_BIT_STARTUP
+        rjmp LCD_Regenerate_Normal
+
+        LDIProgMemAddrZ LCDText_InitLine1
+        rcall LCD_CopyProgZToRamX
+        LDIRamAddrX LCDData + LCDCountInLine
+        LDIProgMemAddrZ LCDText_InitLine2
+        rcall LCD_CopyProgZToRamX
+        rjmp LCD_Generate_Finish
+
+LCD_Regenerate_Normal:
+
+        LDIProgMemAddrZ LCDText_Reset
+        sbrs SERIAL_STATE, SerialBit_Reset
+        rjmp LCD_Gen1
+
+        LDIProgMemAddrZ LCDText_ResetFF7C
+        sbrs SERIAL_STATE, SerialBit_ResetFF7C
+        rjmp LCD_Gen1
+
+        LDIProgMemAddrZ LCDText_NMI
+        sbrs SERIAL_STATE, SerialBit_KeyNMI
+        rjmp LCD_Gen1
+
+        LDIProgMemAddrZ LCDText_Wait
+        sbis Port_ZXWait, BIT_ZXWait
+        rjmp LCD_Gen1
+
+        LDIProgMemAddrZ LCDText_Turbo
+        sbrc SERIAL_STATE, SerialBit_Turbo
+        rjmp LCD_Gen1
+
+        LDIProgMemAddrZ LCDText_Norm
+LCD_Gen1:
+        rcall LCD_CopyProgZToRamX
+        ldi tmp, ' '
+        st X+, tmp
+
+        ldi tmp, 'A'
+        sbrc SERIAL_STATE, SerialBit_Drive0
+        ldi tmp, 'B'
+        st X+, tmp
+
+        ld tmp2, Z
+        ldi tmp, ' '
+        sbrc VAR_STATE, VAR_STATE_BIT_DRIVESWAP
+        ldi tmp, '*'
+        st X+, tmp
+
+        ldi tmp, ' '
+        st X+, tmp
+
+        lds tmp, PRESSED_KEY_CNT
+        subi tmp, -'0'
+        st X+, tmp
+
+        LDIRamAddrX LCDData + LCDCountInLine
+        LDIProgMemAddrZ LCDJoysticks
+        sbrc VAR_STATE, VAR_STATE_BIT_JOYSTICK1
+        adiw zL, 2
+        sbrc VAR_STATE, VAR_STATE_BIT_JOYSTICK2
+        adiw zL, 4
+
+        lpm tmp,  Z+
+        lpm tmp2, Z
+        mov zL, tmp
+        mov zH, tmp2
+        rcall LCD_CopyProgZToRamX
+LCD_Generate_Finish:
+        rcall LCD_OutputDataToDisplay
+        ret
+;-------------------------------------------------------------------------------------
+LCD_CopyProgZToRamX:
+        lpm tmp, Z+
+        tst tmp
+        breq LCD_CopyProgZToRamX_Exit
+        st X+, tmp
+        rjmp LCD_CopyProgZToRamX
+LCD_CopyProgZToRamX_Exit:
+        ret
+;-------------------------------------------------------------------------------------

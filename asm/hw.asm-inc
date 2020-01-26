@@ -1,0 +1,145 @@
+.equ FREQ_MHZ = 20
+.equ FlashFreq = 2
+;------------------------------------------------------------------------
+.equ IOBASE = 32
+;------------------------------------------------------------------------
+.equ Pin_Read1F      = PinD
+.equ Port_Read1F     = PortD
+.equ DD_Read1F       = DDRD
+.equ BIT_Read1F      = 2   ; INT0
+
+.equ Pin_WriteDOSFF  = PinD
+.equ Port_WriteDOSFF = PortD
+.equ DD_WriteDOSFF   = DDRD
+.equ BIT_WriteDOSFF  = 3   ; INT1
+
+.equ Pin_ReadFE      = PinE
+.equ Port_ReadFE     = PortE
+.equ DD_ReadFE       = DDRD
+.equ BIT_ReadFE      = 0   ; INT2
+
+.equ Pin_ZXAddr     = PinC
+.equ Port_ZXAddr    = PortC
+.equ DD_ZXAddr      = DDRC
+
+.equ Pin_ZXData     = PinA
+.equ Port_ZXData    = PortA
+.equ DD_ZXData      = DDRA
+
+.equ Pin_KBClock    = PinD
+.equ Port_KBClock   = PortD
+.equ DD_KBClock     = DDRD
+.equ BIT_KBClock    = 7
+
+.equ Pin_KBData     = PinD
+.equ Port_KBData    = PortD
+.equ DD_KBData      = DDRD
+.equ BIT_KBData     = 6
+
+.equ Port_ZXWait    = PortE
+.equ DD_ZXWait      = DDRE
+.equ BIT_ZXWait     = 1
+
+.equ Pin_ZXFlash     = PinD
+.equ Port_ZXFlash    = PortD
+.equ DD_ZXFlash      = DDRD
+.equ BIT_ZXFlash     = 5
+
+.equ Pin_SerialStore  = PinD
+.equ Port_SerialStore = PortD
+.equ DD_SerialStore   = DDRD
+.equ BIT_SerialStore  = 1
+
+.equ Pin_SerialClock  = PinD
+.equ Port_SerialClock = PortD
+.equ DD_SerialClock   = DDRD
+.equ BIT_SerialClock  = 0
+
+.equ Pin_SerialData   = PinB
+.equ Port_SerialData  = PortB
+.equ DD_SerialData    = DDRB
+.equ BIT_SerialData   = 0
+
+.equ Pin_LCD_E        = PinB
+.equ Port_LCD_E       = PortB
+.equ DD_LCD_E         = DDRB
+.equ BIT_LCD_E        = 4
+
+.equ Pin_LCD_RS       = PinD
+.equ Port_LCD_RS      = PortD
+.equ DD_LCD_RS        = DDRD
+.equ BIT_LCD_RS       = 4
+
+.equ Pin_LCD_RW       = PinE
+.equ Port_LCD_RW      = PortE
+.equ DD_LCD_RW        = DDRE
+.equ BIT_LCD_RW       = 2
+
+.equ Pin_LCD_Bit7     = PinB
+.equ Port_LCD_Bit7    = PortB
+.equ DD_LCD_Bit7      = DDRB
+.equ BIT_LCD_Bit7     = 0
+
+.equ Pin_LCD_Bit6     = PinB
+.equ Port_LCD_Bit6    = PortB
+.equ DD_LCD_Bit6      = DDRB
+.equ BIT_LCD_Bit6     = 1
+
+.equ Pin_LCD_Bit5     = PinB
+.equ Port_LCD_Bit5    = PortB
+.equ DD_LCD_Bit5      = DDRB
+.equ BIT_LCD_Bit5     = 2
+
+.equ Pin_LCD_Bit4     = PinB
+.equ Port_LCD_Bit4    = PortB
+.equ DD_LCD_Bit4      = DDRB
+.equ BIT_LCD_Bit4     = 3
+
+.equ SerialBit_Turbo     = 0
+.equ SerialBit_KeyNMI    = 1
+.equ SerialBit_Reset     = 2
+.equ SerialBit_ResetFF7C = 3
+.equ SerialBit_Drive0    = 4
+
+.if 0
+
+avrdude -c usbasp -p m162 -B 20
+avrdude -c usbasp -p m162 -U efuse:w:0xFF:m hfuse:w:0xD9:m -U lfuse:w:0xEF:m     -B 20
+
+
+;---------------------------------------------------------------------
+;Fuses: (E:FF  H:D9, L:EF)
+E
+bit def our
+  7  1  1
+  6  1  1
+  5  1  1
+  4  1  1    ATmega161 compatibility  mode
+  3  1  1    BODLEVEL2
+  2  1  1    BODLEVEL1
+  1  1  1    BODLEVEL0
+  0  1  1
+
+H
+bit def our
+  7  1  1    OCDEN Enable OCD
+  6  0  1    JTAGEN Enable JTAG
+  5  0  0    SPIEN Enable Serial Program and Data Downloading
+  4  1  1    WDTON Watchdog Timer always on
+  3  1  1    EESAVE EEPROM memory is preserved through the Chip Erase
+  2  0  0    BOOTSZ1
+  1  0  0    BOOTSZ0
+  0  1  1    BOOTRST Select Reset Vector
+
+L
+bit def our
+  7  0  1    CKDIV8 Divide clock by 8
+  6  1  1    CKOUT Clock Output
+  5  1  1    SUT1   Select start-up time
+  4  0  0    SUT0   Select start-up time
+  3  0  1    CKSEL3  Select Clock source
+  2  0  1    CKSEL2
+  1  1  1    CKSEL1
+  0  0  1    CKSEL0
+
+.endif

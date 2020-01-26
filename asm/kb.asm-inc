@@ -1,0 +1,484 @@
+
+;-------------------------------------------------------------------------------------------
+INIT_KEYBOARD_BUFFERS:
+; очистка и заполнение SRAM
+    ldi XH, 0x02		; load SRAM address 0x200 (keyboard buffer)
+    clr XL
+; очистка клавиатурного буфера
+CLEAR_BYTE:
+    st X+,CONST00
+    sbrs XL, 3         ; пока XL меньше 8
+    rjmp CLEAR_BYTE
+; заполнение памяти порта FE (0x7F,...,0xFE) значениями 0xFF
+    ldi ZH,0x01        ; load SRAM address 0x100
+    clr ZL
+CLEAR_BYTE_FE:
+    st Z+, CONST00
+    tst ZL             ; repeat while Z < 0x200
+    brne CLEAR_BYTE_FE
+    ret
+
+;-------------------------------------------------------------------------------------------
+;// Set keyboard staus indicators
+KBD_SEND_INDICATORS:
+    ldi   KBD_BYTE, 0xED    ; keyboard command Set status indicators
+    rcall KBD_SEND		    ; subroutine send command to keyboard
+    mov   KBD_BYTE, KBD_IND ; indicatoes value
+;   Запись байта в клавиатуру
+KBD_SEND:
+    rcall KBD_SEND_BYTE
+    rcall KBD_READ0
+    brcs  PARITY_ERROR
+
+    cpi   KBD_BYTE, 0xFA    ; проверка корректности кода ответа клавиатуры выставление флага для дальнейшей обработки где требуется
+PARITY_ERROR:
+    ret
+;-------------------------------------------------------------------------------------------
+KBD_SEND_BYTE:
+    SetKB_Clock_Out0
+    rcall WAIT_60_Micros
+    SetKB_Data_Out0
+    rcall WAIT_5_Micros
+    SetKB_Clock_In1
+    rcall SMALL_WAIT
+; начинается тактирование CLK от клавиатуры
+    rcall WAIT_CLK0
+    rcall SMALL_WAIT
+; цикл отправки 8 бит данных -------------------------------
+    ldi   tmp, 8
+    clr   tmp2 ; PARITY
+    rjmp  READ_LOOP1
+
+READ_LOOP:
+    rcall WAIT_CLK0
+READ_LOOP1:
+    ror KBD_BYTE                ; KBD_BYTE>> (сдвиг вправо, выдвинутый бит помещается в C)
+    brcs SEND_1                 ; если C=1
+
+;  Отправка бита = 0
+    SetKB_Data_Out0
+    rjmp  KBD_SEND_BIT_DONE
+
+SEND_1: ;  Отправка бита = 1
+    SetKB_Data_In1
+    inc  tmp2                 ; вычисление бита четности
+
+KBD_SEND_BIT_DONE:
+    rcall WAIT_CLK1
+    dec   tmp
+    brne  READ_LOOP
+; // конец цикла отправки ---------------------------------------
+
+;  отправка бита четности
+    rcall WAIT_CLK0
+    ror tmp2
+    brcc SEND_PARITY_1
+    SetKB_Data_Out0
+    rjmp KBD_SEND_PARITY_DONE
+
+SEND_PARITY_1:
+    SetKB_Data_In1
+
+KBD_SEND_PARITY_DONE:
+    rcall WAIT_CLK1
+
+; стоповый бит
+    rcall WAIT_CLK0
+    SetKB_Data_In1
+    rcall WAIT_CLK1
+
+; ACK
+    rcall WAIT_CLK0
+    rcall WAIT_CLK1
+    ret
+;---------------------------------------------------------------------------------------
+;READ FROM KEYBOARD -----------------------------------------------------------------
+; FLAG T - allows reading interrupts
+;
+KBD_READ0:
+    clt
+    rcall SMALL_WAIT
+KBD_READ:
+    SetKB_Clock_In1
+    SetKB_Data_In1
+
+;цикл ожидания пока на DATA пине не станет 0 (т.е. начало приема данных от клавиатуры)
+    clr KBD_BYTE
+    clc ; No parity error
+DATA_1_LOOP:
+    brtc DATA_1_LOOP_NEXT ; if T flag is 0 -> No interrupts by VAR_STATE
+    sbrc VAR_STATE, VAR_STATE_BIT_REFRESH
+    rjmp KBD_READ_EXIT
+DATA_1_LOOP_NEXT:
+    sbic  Pin_KBData, BIT_KBData
+    rjmp  DATA_1_LOOP  ; Loop if DATA KBD PIN=1
+
+KBD_READ1:
+    rcall SMALL_WAIT
+; читаем стартовый бит
+    rcall WAIT_CLK0     ; после этого CLK=0 и C=0
+    rcall WAIT_CLK1     ; после этого CLK=1 и C=0
+
+; цикл чтения 8 бит данных
+    ldi   tmp, 8
+    clr  tmp2 ; PARITY
+KBD_DATA_LOOP:
+    rcall WAIT_CLK0
+
+; read bit to carry flag
+    clc                             ; clear Carry flag
+    sbis  Pin_KBData, BIT_KBData    ; if DATA pin = 1 skip jmp
+    rjmp  KBD_DATA_BIT
+    inc   tmp2                      ; if bit is set - increase parity
+    sec                             ; set Carry flag
+
+KBD_DATA_BIT:
+    ror KBD_BYTE                    ; >KBD_BYTE>> (rotate through Carry)
+
+    rcall WAIT_CLK1                 ; ждем пока CLK не станет равно 1
+    dec   tmp
+    brne  KBD_DATA_LOOP
+; конец цикла чтения-------------------------------------------
+
+;  чтение бита четности
+    rcall WAIT_CLK0
+    sbic  Pin_KBData, BIT_KBData    ; if DATA pin = 0 skip inc
+    inc   tmp2                      ; расчет бита четности
+    rcall WAIT_CLK1
+
+; чтение стоп бита
+    rcall WAIT_CLK0
+    rcall WAIT_CLK1
+
+;	// проверка бита четности
+    sbrs tmp2, 0
+    rjmp READ_ERROR                 ; ошибка если бит не установлен
+    clc                             ; 0 -> C
+    SetKB_Clock_Out0
+    ret
+
+READ_ERROR:
+    clr KBD_BYTE
+    sec                             ; 1->C
+KBD_READ_EXIT:
+    SetKB_Clock_Out0                ; disallow data from KB
+	ret
+;----------------------------------------------------------------------------------------
+; Подпрограммы ожидания смены уровня CLK
+;
+; Проверка переполнения таймера и CLK: цикл пока таймер не переполнится или CLK не станет равно 1
+; Если таймер переполнился, значит таймаут и бит не принят
+; TODO add timer
+WAIT_CLK1:
+    sbis  Pin_KBClock, BIT_KBClock  ; CLK=1 пропускаем jmp
+    rjmp  WAIT_CLK1                 ; loop
+    ret
+
+; Проверка переполнения таймера и CLK: цикл пока таймер не переполнится или CLK не станет равно 0
+WAIT_CLK0:
+    sbic  Pin_KBClock, BIT_KBClock  ; CLK=0 пропускаем jmp
+    rjmp  WAIT_CLK0
+    ret
+
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+; Работа с нажатыми клавишами
+;----------------------------------------------------------------------------------------
+;----------------------------------------------------------------------------------------
+CLEAR_KEY_BUFFER:
+    LDIRamAddrX KEY_BUFFER
+    ldi tmp, KeyBufferSize
+CLEAR_KEY_BUFFER_LOOP:
+    st X+, Const00
+    dec tmp
+    brne CLEAR_KEY_BUFFER_LOOP
+    ret
+;----------------------------------------------------------------------------------------
+ADD_KEY_TO_BUFFER:	; Input:KBD_BYTE
+    LDIRamAddrX KEY_BUFFER
+    ldi tmp, KeyBufferSize
+
+    ; try to add key to end of buffer
+ADD_KEY_TO_BUFFER_LOOP:
+    ld   tmp2, X+            ; read value from buffer
+    cp   tmp2, KBD_BYTE      ; check with scan code
+    breq ADD_KEY_TO_BUFFER_EXIT   ; if key already in buffer - go to next "read key" loop cycle
+
+    tst   tmp2               ; check current value in buffer
+    brne  ADD_KEY_TO_BUFFER_NOTZERO    ; jump if not zero (repeat if not end of buffer)
+    st    -X, KBD_BYTE      ; store byte where zero value was found
+    ret
+
+ADD_KEY_TO_BUFFER_NOTZERO:
+    dec tmp
+    brne ADD_KEY_TO_BUFFER_LOOP
+ADD_KEY_TO_BUFFER_EXIT:
+    ret
+;----------------------------------------------------------------------------------------
+REMOVE_KEY_FROM_BUFFER:
+    LDIRamAddrX KEY_BUFFER
+    ldi tmp, KeyBufferSize
+REMOVE_KEY_FROM_BUFFER_LOOP:
+    ld   tmp2, X+        ; read value from buffer
+    cp   tmp2, KBD_BYTE  ; check with scan code
+    breq REMOVE_KEY_FROM_BUFFER_FOUND
+REMOVE_KEY_FROM_BUFFER_NEXT:
+    dec  tmp
+    brne REMOVE_KEY_FROM_BUFFER_LOOP
+    ; удалять то нечего, странно
+    ret
+REMOVE_KEY_FROM_BUFFER_FOUND:
+    ; надо сдвинуть весь буффер, иначе добавлялка может добавить код еще раз
+    dec tmp
+    brne REMOVE_KEY_FROM_BUFFER_FOUND_NEXT
+    st   -X, Const00
+    ret
+REMOVE_KEY_FROM_BUFFER_FOUND_NEXT:
+    ld tmp2, X
+    st -X, tmp2
+    adiw xL, 2
+    rjmp REMOVE_KEY_FROM_BUFFER_FOUND
+;----------------------------------------------------------------------------------------
+; --- Заполнение адресов порта #FE данными о нажатых клавишах
+FILL_PORT_FE:
+    ldi  ZH, HIGH(PORT_FE_DATA)
+    mov  ZL, CONSTFF
+    clr tmp2
+    ;mov tmp2, KBD_STATE
+    ;com tmp2
+    st  Z, tmp2      ; 0xFF -> [0x1FF]
+CALC_ROW_VALUE:
+;  вычисление адреса порта FE (т.е. где в памяти находятся байты для KA8,KA9,...,KA15)
+    dec ZL
+    clr tmp2
+    sbrs ZL, 0
+    or   tmp2, KA08_ROW
+    sbrs ZL, 1
+    or   tmp2, KA09_ROW
+    sbrs ZL, 2
+    or   tmp2, KA10_ROW
+    sbrs ZL, 3
+    or   tmp2, KA11_ROW
+    sbrs ZL, 4
+    or   tmp2, KA12_ROW
+    sbrs ZL, 5
+    or   tmp2, KA13_ROW
+    sbrs ZL, 6
+    or   tmp2, KA14_ROW
+    sbrs ZL, 7
+    or   tmp2, KA15_ROW
+    ;ori tmp2, 128
+    st Z, tmp2
+    tst ZL
+    brne CALC_ROW_VALUE	; пока XL больше 0
+    ret
+; ------------------------------------------------
+
+PROCESS_KBD_BUFFER:         ; обработка буфера клавиатуры
+    clr KA08_ROW
+    clr KA09_ROW
+    clr KA10_ROW
+    clr KA11_ROW
+    clr KA12_ROW
+    clr KA13_ROW
+    clr KA14_ROW
+    clr KA15_ROW
+    mov KEMPSTON_REG, CONSTFF
+
+    sbrc KBD_STATE, KBD_STATE_BIT_SYM_SHIFT_PRESSED       ; проверка SymbolShift
+    rcall SET_SS_BIT
+
+    sbrc KBD_STATE, KBD_STATE_BIT_CAPS_SHIFT_PRESSED     ; проверка CapsShift
+    rcall SET_CS_BIT
+
+    LDIRamAddrX KEY_BUFFER
+; ------------------------------------------------
+    clr tmp
+PROCESS_KEY_LOOP: ;//loop
+    ld  tmp2, X+
+    tst tmp2       ; если нулевое значение в буфере, то на следующую итерацию
+    breq KEYCODE_IS_EMPTY
+
+    inc tmp
+    push tmp
+; в tmp2 значение клавиши из буфера
+
+; KEYTABLE ////////////////////////////////////////
+; выборка значения из KEYTABLE'S
+    LDIProgMemAddrZ KEYTABLE
+    add ZL, tmp2
+    adc ZH, Const00
+    lpm  KEYCODE, Z            ; [Z] -> KEYCODE выбрали значение для клавиши из KEYTABLE'S
+    rcall   PROCESS_KEY_CODE   ; проверка битов алтьтернативной таблицы в коде клавиши
+    pop tmp
+KEYCODE_IS_EMPTY:
+    sbrs  XL, 3
+    rjmp  PROCESS_KEY_LOOP             ; если XL < 8 цикл
+;	// ------------------------------------------------
+    sts PRESSED_KEY_CNT, tmp
+
+    rcall FILL_PORT_FE
+    andi  KBD_STATE, 255 - (1 << KBD_STATE_BIT_EXT_MODE)  ; clear bit 7
+    ret
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+;----------------------------------------------------
+PROCESS_KEY_CODE:
+    tst   KEYCODE
+    brne  KEYVAL_NOTEMPTY
+    ret
+KEYVAL_NOTEMPTY:
+    sbrs  KEYCODE, 7
+    rjmp  PROCESS_USUAL_KEYCODE
+    sbrc  KEYCODE, 6
+    rjmp  USE_ALT_KEYTABLE
+
+PROCESS_USUAL_KEYCODE:
+    sbrc  KEYCODE, 6
+    rcall SET_SS_BIT
+
+    sbrc  KEYCODE, 7
+    rcall SET_CS_BIT
+
+    mov   tmp2, KEYCODE
+    andi  tmp2, 0x07     ; remove shift bits from keycode
+    cpi   tmp2, DKEMPSTON
+    breq  PROCESS_KEMPSTON_KEYCODE
+    mov   tmp, tmp2      ; move data bits value to tmp
+    ldi   tmp2, 1        ; Set default bits value for bit 0
+
+L023B:; // check bit loop
+    dec tmp
+    breq L0240  ; break loop if tmp=0
+    lsl tmp2
+    rjmp L023B
+
+L0240: ;// find value in keybuffer 0x200 using address bits
+    mov zL, KEYCODE
+    lsl zL
+    swap zL
+    andi zL, 7
+    ori zL, 8
+
+    ldi  zH, 0 ;  Directly to KAXX_ROW register
+    ld   tmp, Z
+    or   tmp, tmp2
+    st   Z, tmp
+    ret
+;----------------------------------------------------
+PROCESS_KEMPSTON_KEYCODE:
+    mov tmp, KEYCODE
+    lsr tmp
+    lsr tmp
+    lsr tmp
+    ldi tmp2, 1
+PROCESS_KEMPSTON_KEYCODE_LOOP:
+    tst tmp
+    breq PROCESS_KEMPSTON_KEYCODE_LOOP_FINISH
+    lsl tmp2
+    dec tmp
+    rjmp PROCESS_KEMPSTON_KEYCODE_LOOP
+PROCESS_KEMPSTON_KEYCODE_LOOP_FINISH:
+    com tmp2
+    and KEMPSTON_REG, tmp2
+    ret
+;----------------------------------------------------
+SET_CS_BIT:
+    ldi  tmp2, 1
+    or KA08_ROW, tmp2
+    ret
+
+SET_SS_BIT:
+    ldi  tmp2, 2
+    or KA15_ROW, tmp2
+    ret
+
+RESET_CS_BIT:
+    ldi tmp2, 255 - 1
+    and KA08_ROW, tmp2
+    ret
+
+RESET_SS_BIT:
+    ldi tmp2, 255 - 2
+    and KA15_ROW, tmp2
+    ret
+
+SET_E_MODE:    ; Переключение в режим E
+    sbrc KBD_STATE, KBD_STATE_BIT_EXT_MODE	; skip if already set E mode
+    ret
+    push xL
+    rcall SET_CS_BIT
+    rcall SET_SS_BIT
+    rcall FILL_PORT_FE
+    ldi tmp, 25
+    rcall WAIT_Tmp_Millis
+    rcall RESET_CS_BIT
+    rcall RESET_SS_BIT
+    rcall FILL_PORT_FE
+    pop xL
+    ori KBD_STATE, 1 << KBD_STATE_BIT_EXT_MODE
+    ret
+
+;----------------------------------------------------
+USE_ALT_KEYTABLE:
+    mov  tmp2, KEYCODE
+    andi tmp2, 0x1F      ; clear alternate bits and get alternate key number in table
+    lsl  tmp2            ; tmp2 = tmp2 * 2
+    sbrc KEYCODE, 5      ; check ALT2 table bit
+    rjmp USE_ALT2
+
+    LDIProgMemAddrZ KEYTABLE_ALT
+    add  ZL, tmp2
+    adc  ZH, Const00
+    sbrs KBD_STATE, KBD_STATE_BIT_CAPS_SHIFT_PRESSED ; // проверка CapsSHIFT
+    rjmp NO_CAPSSHIFT
+; выборка второго значения из таблицы KEYTABLE_ALT
+    inc	ZL
+    lpm  KEYCODE, Z        ; [Z] -> KEYCODE, выборка второго значения (с CapsShift)
+    rcall RESET_CS_BIT
+    sbrs  KEYCODE, 7            ; check EXT MODE bit
+    rjmp  NO_E1
+    clt
+    bld   KEYCODE, 7
+    rcall SET_E_MODE
+NO_E1:
+    rjmp  PROCESS_USUAL_KEYCODE ;  обработка, если не нажат CapsShift
+NO_CAPSSHIFT:
+;// выборка первого значения из таблицы KEYTABLE_ALT
+    lpm  KEYCODE, Z ; [Z] -> KEYCODE, выборка первого значения (без CapsShift)
+    sbrs  KEYCODE, 7           ; check EXT MODE bit
+    rjmp  NO_E2
+    clt
+    bld   KEYCODE, 7
+    rcall SET_E_MODE
+NO_E2:
+    rjmp  PROCESS_USUAL_KEYCODE ;  // обработка
+
+USE_ALT2:
+    lsl tmp2
+    sbrc VAR_STATE, VAR_STATE_BIT_JOYSTICK1
+    inc tmp2
+    sbrc VAR_STATE, VAR_STATE_BIT_JOYSTICK2
+    subi tmp2, 256 - 2
+
+    LDIProgMemAddrZ KEYTABLE_ALT2
+    add  zL, tmp2
+    adc  zH, Const00
+    lpm  KEYCODE, Z    ;  [Z] -> KEYCODE
+    rjmp PROCESS_USUAL_KEYCODE ;// обработка, если не нажат CapsShift
+;----------------------------------------------------
+

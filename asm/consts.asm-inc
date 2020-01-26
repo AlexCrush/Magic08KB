@@ -1,0 +1,64 @@
+.def KEYCODE       = r0
+;r1 - UNUSED
+;r2 - UNUSED
+;r3 - UNUSED
+.def CONST00       = r4
+.def KBD_BYTE_PREV = r5
+;r6 UNUSED
+.def KEMPSTON_REG  = r7
+.def KA08_ROW      = r8
+.def KA09_ROW      = r9
+.def KA10_ROW      = r10
+.def KA11_ROW      = r11
+.def KA12_ROW      = r12
+.def KA13_ROW      = r13
+.def KA14_ROW      = r14
+.def KA15_ROW      = r15
+.def tmp           = r16
+.def VAR_STATE     = r17
+.def tmp2          = r18
+;UNUSED            = r19
+.def INT_TMP       = r20
+.def CONSTFF       = r21
+.def SERIAL_STATE  = r22
+.def KBD_STATE     = r23
+.def KBD_IND       = r24
+.def KBD_BYTE      = r25
+; xL = r26
+; xH = r27
+; yL = r28  ; USED IN INT!
+; yH = r29  ; USED IN INT!
+; zL = r30
+; zH = r31
+
+.equ KBD_STATE_BIT_E0_PFX               = 0
+.equ KBD_STATE_BIT_F0_PFX               = 1
+.equ KBD_STATE_BIT_WIN_PRESSED          = 2
+.equ KBD_STATE_BIT_SYM_SHIFT_PRESSED    = 4
+.equ KBD_STATE_BIT_CAPS_SHIFT_PRESSED   = 5
+.equ KBD_STATE_BIT_EXT_MODE             = 7
+
+; KBD_STATE
+;  bit 0 indicated #E0 prefix
+;  bit 1 indicates #F0 prefix
+;  bit 2 win key flag
+;  bit 3 -
+;  bit 4 symbol shift flag
+;  bit 5 caps shift flag
+;  bit 6 -----
+;  bit 7 Ext Mode set
+
+.equ VAR_STATE_BIT_DRIVESWAP   = 0
+.equ VAR_STATE_BIT_JOYSTICK1   = 1
+.equ VAR_STATE_BIT_JOYSTICK2   = 2
+.equ VAR_STATE_BIT_REFRESH     = 3 ; требуется обновление serial_state и/или lcd
+.equ VAR_STATE_BIT_STARTUP     = 4 ; первое нажатие клавиши еще не случилось
+
+; Cursor, Sinclair, Kempston, UNUSED
+
+;----------------------------------------------------------------------
+.equ   KeyBufferSize = 8
+
+.equ   LCDCountInLine     = 16
+.equ   LCDLineCount       = 2
+.equ   LCDCount           = (LCDCountInLine * LCDLineCount)

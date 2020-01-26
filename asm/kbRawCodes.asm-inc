@@ -1,0 +1,216 @@
+RAW_KEYCODE_PROCESS:
+    lpm tmp, Z+
+    tst tmp
+    breq RAW_KEYCODE_PROCESS_LOOP_END
+    lpm tmp2, Z+
+    cp tmp, KBD_BYTE
+    breq RAW_KEYCODE_PROCESS_FOUND
+    adiw zL, 2
+    rjmp RAW_KEYCODE_PROCESS
+RAW_KEYCODE_PROCESS_LOOP_END:
+    ret
+RAW_KEYCODE_PROCESS_FOUND:
+    push tmp2
+    lpm tmp, Z+
+    lpm zH, Z+
+    mov zL, tmp
+    or tmp, zH
+    breq RAW_KEYCODE_PROCESS_SKIPCALL
+    icall
+RAW_KEYCODE_PROCESS_SKIPCALL:
+    pop KBD_BYTE
+    ret
+;----------------------------------------------------
+RAW_KEYCODE_PREPROCESS_TABLE:
+    .db 0xF0, 0
+    .dw PROCESS_RAWCODE_F0
+    .db 0xE0, 0
+    .dw PROCESS_RAWCODE_E0
+    .db 0xE1, 0
+    .dw PROCESS_RAWCODE_PAUSE
+    .db 0x83, 0x08 ; F7 keycode has bit 7 set... so replace it with keycode not defined in PS/2 scancode set 2
+    .dw 0
+    .db 0, 0
+;----------------------------------------------------
+PROCESS_RAWCODE_F0:
+    sbr KBD_STATE, 1 << KBD_STATE_BIT_F0_PFX
+    ret
+;----------------------------------------------------
+PROCESS_RAWCODE_E0:
+    sbr KBD_STATE, 1 << KBD_STATE_BIT_E0_PFX
+    ret
+;----------------------------------------------------
+PROCESS_RAWCODE_PAUSE:
+    ldi tmp2, 7
+PAUSE_KEY_SKIP:
+    push tmp2
+    rcall KBD_READ0
+    pop tmp2
+    dec tmp2
+    brne PAUSE_KEY_SKIP
+
+    sbic Port_ZXWait, BIT_ZXWait
+    rjmp PROCESS_RAWCODE_PAUSE_1
+    sbi  Port_ZXWait, BIT_ZXWait
+    ret
+PROCESS_RAWCODE_PAUSE_1:
+    cbi  Port_ZXWait, BIT_ZXWait
+    ret
+;----------------------------------------------------
+RAW_KEYCODE_PRESSED_TABLE:
+    .db KEY_DRIVESWAP, 0
+    .dw PROCESS_PRESSED_DRIVESWAP
+    .db KEY_TURBO, 0
+    .dw PROCESS_PRESSED_TURBO
+    .db KEY_ESC, 0
+    .dw PROCESS_PRESSED_ESC
+    .db KEY1_FOR_SYMSHIFT, 0
+    .dw PROCESS_PRESSED_SYM_SHIFT
+    .db KEY2_FOR_SYMSHIFT, 0
+    .dw PROCESS_PRESSED_SYM_SHIFT
+    .db KEY1_FOR_CAPSSHIFT, 0
+    .dw PROCESS_PRESSED_CAPS_SHIFT
+    .db KEY2_FOR_CAPSSHIFT, 0
+    .dw PROCESS_PRESSED_CAPS_SHIFT
+    .db 0x77, 0 ; NUMLOCK
+    .dw PROCESS_PRESSED_NUMLOCK
+    .db 0x58, 0x58 ; CapsLock
+    .dw PROCESS_PRESSED_CAPSLOCK
+    .db 0x7E, 0 ; ScrollLock
+    .dw PROCESS_PRESSED_SCRLOCK
+    .db KEY_LWIN, 0
+    .dw PROCESS_PRESSED_WIN
+    .db KEY_RWIN, 0
+    .dw PROCESS_PRESSED_WIN
+    .db KEY_NMI, 0
+    .dw 0
+    .db KEY_RESET_FF7C, 0
+    .dw 0
+    .db KEY_RESET, 0
+    .dw 0
+    .db 0, 0
+;----------------------------------------------------
+PROCESS_PRESSED_ESC:
+    rcall CLEAR_KEY_BUFFER
+    rcall PROCESS_KBD_BUFFER
+    ret
+;----------------------------------------------------
+PROCESS_PRESSED_TURBO:
+    ldi tmp, 1 << SerialBit_Turbo
+    eor SERIAL_STATE, tmp
+    ret
+;----------------------------------------------------
+PROCESS_PRESSED_CAPS_SHIFT:
+    ori  KBD_STATE, 1 << KBD_STATE_BIT_CAPS_SHIFT_PRESSED
+    rjmp PROCESS_KBD_BUFFER
+;----------------------------------------------------
+PROCESS_PRESSED_SYM_SHIFT:
+    ori  KBD_STATE, 1 << KBD_STATE_BIT_SYM_SHIFT_PRESSED
+    rjmp PROCESS_KBD_BUFFER
+;----------------------------------------------------
+PROCESS_PRESSED_NUMLOCK:
+    clr tmp
+    bst VAR_STATE, VAR_STATE_BIT_JOYSTICK1
+    bld tmp, 0
+    bst VAR_STATE, VAR_STATE_BIT_JOYSTICK2
+    bld tmp, 1
+    inc tmp
+    cpi tmp, 3
+    brne PROCESS_PRESSED_NUMLOCK_IMPOSSIBLE
+    clr tmp
+PROCESS_PRESSED_NUMLOCK_IMPOSSIBLE:
+    bst tmp, 0
+    bld VAR_STATE, VAR_STATE_BIT_JOYSTICK1
+    bst tmp, 1
+    bld VAR_STATE, VAR_STATE_BIT_JOYSTICK2
+    ret
+;----------------------------------------------------
+PROCESS_PRESSED_CAPSLOCK:
+    ldi  xL, 4
+    eor  KBD_IND, xL
+    rjmp KBD_SEND_INDICATORS
+;----------------------------------------------------
+PROCESS_PRESSED_SCRLOCK:
+    ldi  xL, 1
+    eor  KBD_IND, xL
+    rjmp KBD_SEND_INDICATORS
+;----------------------------------------------------
+PROCESS_PRESSED_WIN:
+    ori KBD_STATE, 1 << KBD_STATE_BIT_WIN_PRESSED
+    ret
+;----------------------------------------------------
+RAW_KEYCODE_RELEASED_TABLE:
+    .db KEY_ESC, 0
+    .dw 0
+    .db KEY_NMI, 0
+    .dw PROCESS_RELEASED_NMI
+    .db KEY_RESET_FF7C, 0
+    .dw PROCESS_RELEASED_RESET_FF7C
+    .db KEY_RESET, 0
+    .dw PROCESS_RELEASED_RESET
+    .db KEY1_FOR_SYMSHIFT, 0
+    .dw PROCESS_RELEASED_SYM_SHIFT
+    .db KEY2_FOR_SYMSHIFT, 0
+    .dw PROCESS_RELEASED_SYM_SHIFT
+    .db KEY1_FOR_CAPSSHIFT, 0
+    .dw PROCESS_RELEASED_CAPS_SHIFT
+    .db KEY2_FOR_CAPSSHIFT, 0
+    .dw PROCESS_RELEASED_CAPS_SHIFT
+    .db KEY_LWIN, 0
+    .dw PROCESS_RELEASED_WIN
+    .db KEY_RWIN, 0
+    .dw PROCESS_RELEASED_WIN
+    .db 0, 0
+;----------------------------------------------------
+PROCESS_RELEASED_RESET:
+    ori SERIAL_STATE, (1 << SerialBit_Reset)
+    ret
+;----------------------------------------------------
+PROCESS_RELEASED_RESET_FF7C:
+    ori SERIAL_STATE, (1 << SerialBit_ResetFF7C)
+    ret
+;----------------------------------------------------
+PROCESS_RELEASED_NMI:
+    ori SERIAL_STATE, (1 << SerialBit_KeyNMI)
+    ret
+;----------------------------------------------------
+PROCESS_RELEASED_CAPS_SHIFT:
+    andi KBD_STATE, 255 - (1 << KBD_STATE_BIT_CAPS_SHIFT_PRESSED) ; RESet Caps Shift Flag Bit 5
+    rjmp PROCESS_KBD_BUFFER
+;----------------------------------------------------
+PROCESS_RELEASED_SYM_SHIFT:
+    andi KBD_STATE, 255 - (1 << KBD_STATE_BIT_SYM_SHIFT_PRESSED) ; RESet Symbol Shift Flag Bit 4
+    rjmp PROCESS_KBD_BUFFER
+;----------------------------------------------------
+PROCESS_RELEASED_WIN:
+    andi KBD_STATE, 255 - (1 << KBD_STATE_BIT_WIN_PRESSED)
+    ret
+;----------------------------------------------------
+RAW_KEYCODE_WINPRESSED_TABLE:
+    .db KEY_NMI, 0
+    .dw PROCESS_PRESSED_NMI
+    .db KEY_RESET_FF7C, 0
+    .dw PROCESS_PRESSED_RESET_FF7C
+    .db KEY_RESET, 0
+    .dw PROCESS_PRESSED_RESET
+    .db 0, 0
+;----------------------------------------------------
+PROCESS_PRESSED_NMI:
+    andi SERIAL_STATE, 255 - (1 << SerialBit_KeyNMI)
+    ret
+;----------------------------------------------------
+PROCESS_PRESSED_RESET:
+    andi SERIAL_STATE, 255 - (1 << SerialBit_Reset)
+    ret
+;----------------------------------------------------
+PROCESS_PRESSED_RESET_FF7C:
+    andi SERIAL_STATE, 255 - (1 << SerialBit_ResetFF7C)
+    ret
+;----------------------------------------------------
+PROCESS_PRESSED_DRIVESWAP:
+    ldi tmp, 1 << VAR_STATE_BIT_DRIVESWAP
+    eor VAR_STATE, tmp
+    ldi tmp, 1 << SerialBit_Drive0
+    eor SERIAL_STATE, tmp
+    ret
+;----------------------------------------------------
